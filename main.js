@@ -1,12 +1,13 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, clipboard, Menu } = require('electron')
+const { app, BrowserWindow, ipcMain, Menu, clipboard } = require('electron')
 
 let launcherWindow
 let examWindow
+let focusInterval
+let isPunished = false // Status apakah sedang dihukum
 
-// Matikan Hardware Acceleration agar tidak ngelag saat forcing focus
 app.disableHardwareAcceleration()
 
-// 1. Jendela Launcher (Input URL)
+// 1. LAUNCHER
 function createLauncher() {
   launcherWindow = new BrowserWindow({
     width: 450,
@@ -15,112 +16,142 @@ function createLauncher() {
     autoHideMenuBar: true,
     frame: true,
     icon: __dirname + '/icon.ico',
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    }
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
   })
-
   launcherWindow.loadFile('index.html')
-  
-  // Hapus menu default
   Menu.setApplicationMenu(null)
 }
 
-// 2. Jendela Ujian (SECURITY KETAT)
+// 2. EXAM WINDOW
 function createExamWindow(targetUrl) {
-  if (launcherWindow) launcherWindow.close();
+  if (launcherWindow) {
+    launcherWindow.close()
+    launcherWindow = null
+  }
 
   examWindow = new BrowserWindow({
-    fullscreen: true,       
-    kiosk: true,            // Mode Kiosk
-    frame: false,           
-    alwaysOnTop: true,      // PAKSA SELALU DI ATAS
-    closable: false,        // Tidak bisa di-close user
-    minimizable: false,     // Tidak bisa di-minimize
+    fullscreen: true,
+    kiosk: true,
+    frame: false,
+    alwaysOnTop: true,
+    closable: false,
+    minimizable: false,
+    skipTaskbar: true,
     icon: __dirname + '/icon.ico',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       devTools: false,
-      // Preload script jika perlu (opsional)
     }
   })
 
-  // Set level "Screen Saver" agar menimpa Taskbar dan aplikasi lain
   examWindow.setAlwaysOnTop(true, 'screen-saver')
-
   examWindow.loadURL(targetUrl)
 
-  // --- FITUR SECURITY BARU (LEBIH KEJAM) ---
+  // --- LOGIKA HUKUMAN (SUNTIKAN SCRIPT) ---
+  // Script ini akan dijalankan di browser siswa saat melanggar
+  const scriptHukuman = `
+    (function() {
+        if(document.getElementById('hukuman-overlay')) return; // Jangan double
 
-  // A. ANTI-TAB & ANTI-MINIMIZE (Logic: "Jendela Posesif")
-  // Jika jendela kehilangan fokus (karena Alt+Tab), paksa ambil fokus lagi!
+        // 1. Buat Layar Penutup
+        const div = document.createElement('div');
+        div.id = 'hukuman-overlay';
+        div.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:2147483647; display:flex; flex-direction:column; justify-content:center; align-items:center; color:white; font-family:sans-serif; text-align:center;';
+        
+        // 2. Isi Pesan
+        div.innerHTML = '<h1 style="font-size:50px; color:#ff4444; margin-bottom:10px;">⚠️ PELANGGARAN! ⚠️</h1><h2 style="margin-bottom:20px;">Anda terdeteksi meninggalkan ujian.</h2><h3>Sistem terkunci selama <span id="hukuman-timer" style="font-size:40px; color:yellow;">60</span> detik.</h3><p>Jangan coba-coba keluar lagi.</p>';
+        
+        document.body.appendChild(div);
+
+        // 3. Efek Blur pada Soal (di belakang overlay)
+        document.body.style.filter = 'blur(10px)';
+
+        // 4. Hitung Mundur
+        let sisa = 60;
+        const timerElem = document.getElementById('hukuman-timer');
+        const interval = setInterval(() => {
+            sisa--;
+            if(timerElem) timerElem.innerText = sisa;
+            
+            if(sisa <= 0) {
+                clearInterval(interval);
+                div.remove(); // Hapus overlay
+                document.body.style.filter = 'none'; // Hapus blur
+            }
+        }, 1000);
+    })();
+  `
+
+  // --- SECURITY EVENT ---
+
+  // A. Trigger Hukuman saat Blur (Alt+Tab / Klik App Lain)
   examWindow.on('blur', () => {
-    // Cek apakah window masih ada
-    if (!examWindow) return
+    if (!examWindow || isPunished) return; // Jika sudah dihukum, jangan tumpuk
+
+    console.log("Pelanggaran terdeteksi!");
     
-    // Hapus clipboard sebagai hukuman
-    clipboard.clear()
-    
-    // Paksa fokus kembali (hampir instan)
+    // 1. Set Status Dihukum
+    isPunished = true;
+    clipboard.clear(); // Kosongkan clipboard
+
+    // 2. Suntikkan Script Hukuman ke Layar
+    examWindow.webContents.executeJavaScript(scriptHukuman);
+
+    // 3. Reset Status Hukuman setelah 60 detik (Sesuai timer di script)
+    setTimeout(() => {
+        isPunished = false;
+    }, 61000); 
+
+    // 4. Tetap paksa fokus kembali (Biar dia nontonin timer hukuman)
     setTimeout(() => {
         if(examWindow) {
-            examWindow.restore()
-            examWindow.focus()
-            examWindow.setAlwaysOnTop(true, 'screen-saver')
+            examWindow.restore();
+            examWindow.focus();
         }
-    }, 100) 
-  })
+    }, 100);
+  });
 
-  // B. BLOKIR KEYBOARD DARI DALAM (Intercept Input)
-  // Ini menangkap tombol SEBELUM website memprosesnya. Lebih ampuh dari globalShortcut.
+
+  // B. KEYBOARD INTERCEPT (Ctrl+Q tetap jalan buat emergency)
   examWindow.webContents.on('before-input-event', (event, input) => {
-    // Blokir Tombol F1 - F12
-    if (input.key.startsWith('F') && input.type === 'keyDown') {
-        event.preventDefault()
-        return
+    if (input.key.toLowerCase() === 'q' && (input.control || input.meta)) {
+      event.preventDefault();
+      app.quit();
+      return;
     }
 
-    // Blokir Kombinasi Tombol CTRL / ALT
-    if (input.control || input.alt || input.meta) {
-        // Daftar tombol yang dilarang dikombinasikan dengan Ctrl/Alt
-        const forbiddenKeys = ['c', 'v', 'x', 'a', 'p', 's', 'u', 'Tab', 'Escape', 'ArrowLeft', 'ArrowRight'];
-        
-        if (forbiddenKeys.includes(input.key)) {
-            event.preventDefault() // BATALKAN AKSINYA
-        }
+    if (input.key.startsWith('F') || input.alt || input.meta) {
+       event.preventDefault();
     }
-  })
+  });
 
-  // C. Blokir Klik Kanan
-  examWindow.webContents.on('context-menu', (e) => e.preventDefault())
-
-  // D. Blokir Navigasi (Mencegah buka link ke window baru)
-  examWindow.webContents.setWindowOpenHandler(() => {
-    return { action: 'deny' }
-  })
-
-  // E. RAHASIA KELUAR: Ctrl + Q (Gunakan Global Shortcut untuk ini)
-  globalShortcut.register('CommandOrControl+Q', () => {
-    // Matikan proteksi sebelum keluar agar tidak error
-    if (examWindow) {
-        examWindow.setAlwaysOnTop(false)
-        examWindow = null
+  // C. LOOPING PENJAGA (Tetap jalan untuk memastikan layar tidak diminimize)
+  focusInterval = setInterval(() => {
+    if (examWindow && !examWindow.isDestroyed()) {
+      if (!examWindow.isFocused()) {
+        examWindow.show();
+        examWindow.focus();
+        examWindow.setAlwaysOnTop(true, 'screen-saver');
+      }
     }
-    app.quit()
-  })
+  }, 100); 
+
+  // D. Blokir Navigasi
+  examWindow.webContents.on('context-menu', (e) => e.preventDefault());
+  examWindow.webContents.setWindowOpenHandler(() => { return { action: 'deny' } });
 }
 
+// --- APP LIFECYCLE ---
 app.whenReady().then(() => {
-  createLauncher()
-  
+  createLauncher();
   ipcMain.on('start-exam-mode', (event, url) => {
-    createExamWindow(url)
-  })
-})
+    createExamWindow(url);
+  });
+});
 
-// Mencegah aplikasi keluar sendiri
-app.on('window-all-closed', (e) => {
-  e.preventDefault() 
-})
+app.on('will-quit', () => {
+  if (focusInterval) clearInterval(focusInterval);
+});
+
+app.on('window-all-closed', () => {});
