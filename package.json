@@ -1,5 +1,5 @@
 {
-  "name": "exambro-pro",
+  "name": "exambro-altri",
   "version": "1.0.0",
   "description": "Secure Exam Browser",
   "main": "main.js",
@@ -22,4 +22,5 @@
     }
   }
 }
+
 
