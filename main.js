@@ -3,9 +3,9 @@ const { app, BrowserWindow, ipcMain, Menu, clipboard } = require('electron')
 let launcherWindow
 let examWindow
 let focusInterval
-let isPunished = false // Status apakah sedang dihukum
+let isPunished = false 
 
-app.disableHardwareAcceleration()
+app.disableHardwareAcceleration() // Biar ga berat/lag
 
 // 1. LAUNCHER
 function createLauncher() {
@@ -48,26 +48,27 @@ function createExamWindow(targetUrl) {
   examWindow.setAlwaysOnTop(true, 'screen-saver')
   examWindow.loadURL(targetUrl)
 
-  // --- LOGIKA HUKUMAN (SUNTIKAN SCRIPT) ---
-  // Script ini akan dijalankan di browser siswa saat melanggar
+  // --- SCRIPT HUKUMAN (PERBAIKAN TAMPILAN) ---
+  // Menggunakan 'backdrop-filter' agar teks tetap TAJAM
   const scriptHukuman = `
     (function() {
-        if(document.getElementById('hukuman-overlay')) return; // Jangan double
+        if(document.getElementById('hukuman-overlay')) return; 
 
-        // 1. Buat Layar Penutup
         const div = document.createElement('div');
         div.id = 'hukuman-overlay';
-        div.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:2147483647; display:flex; flex-direction:column; justify-content:center; align-items:center; color:white; font-family:sans-serif; text-align:center;';
         
-        // 2. Isi Pesan
-        div.innerHTML = '<h1 style="font-size:50px; color:#ff4444; margin-bottom:10px;">⚠️ PELANGGARAN! ⚠️</h1><h2 style="margin-bottom:20px;">Anda terdeteksi meninggalkan ujian.</h2><h3>Sistem terkunci selama <span id="hukuman-timer" style="font-size:40px; color:yellow;">60</span> detik.</h3><p>Jangan coba-coba keluar lagi.</p>';
+        // CSS PERBAIKAN:
+        // backdrop-filter: blur(20px) -> Membuat background di belakangnya blur
+        // background: rgba(...) -> Hitam transparan agar teks kontras
+        div.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); z-index:2147483647; display:flex; flex-direction:column; justify-content:center; align-items:center; color:white; font-family:sans-serif; text-align:center;';
+        
+        div.innerHTML = '<h1 style="font-size:50px; color:#ff4444; margin-bottom:10px; text-shadow: 2px 2px 0 #000;">⚠️ PELANGGARAN! ⚠️</h1><h2 style="margin-bottom:20px; text-shadow: 1px 1px 0 #000;">Anda terdeteksi meninggalkan ujian.</h2><h3>Sistem terkunci selama <span id="hukuman-timer" style="font-size:50px; color:#ffff00; font-weight:bold;">60</span> detik.</h3><p>Jangan coba-coba keluar lagi.</p>';
         
         document.body.appendChild(div);
 
-        // 3. Efek Blur pada Soal (di belakang overlay)
-        document.body.style.filter = 'blur(10px)';
+        // Tidak perlu nge-blur body lagi karena sudah pakai backdrop-filter
 
-        // 4. Hitung Mundur
+        // Hitung Mundur
         let sisa = 60;
         const timerElem = document.getElementById('hukuman-timer');
         const interval = setInterval(() => {
@@ -76,34 +77,27 @@ function createExamWindow(targetUrl) {
             
             if(sisa <= 0) {
                 clearInterval(interval);
-                div.remove(); // Hapus overlay
-                document.body.style.filter = 'none'; // Hapus blur
+                div.remove(); 
             }
         }, 1000);
     })();
   `
 
-  // --- SECURITY EVENT ---
+  // --- EVENT HANDLER ---
 
-  // A. Trigger Hukuman saat Blur (Alt+Tab / Klik App Lain)
+  // A. Trigger Hukuman saat Blur
   examWindow.on('blur', () => {
-    if (!examWindow || isPunished) return; // Jika sudah dihukum, jangan tumpuk
+    if (!examWindow || isPunished) return;
 
-    console.log("Pelanggaran terdeteksi!");
-    
-    // 1. Set Status Dihukum
+    // HUKUMAN
     isPunished = true;
-    clipboard.clear(); // Kosongkan clipboard
-
-    // 2. Suntikkan Script Hukuman ke Layar
+    clipboard.clear(); 
     examWindow.webContents.executeJavaScript(scriptHukuman);
 
-    // 3. Reset Status Hukuman setelah 60 detik (Sesuai timer di script)
-    setTimeout(() => {
-        isPunished = false;
-    }, 61000); 
+    // Reset status setelah 60 detik
+    setTimeout(() => { isPunished = false; }, 61000); 
 
-    // 4. Tetap paksa fokus kembali (Biar dia nontonin timer hukuman)
+    // Paksa Fokus Balik (Biar nonton hukuman)
     setTimeout(() => {
         if(examWindow) {
             examWindow.restore();
@@ -113,20 +107,34 @@ function createExamWindow(targetUrl) {
   });
 
 
-  // B. KEYBOARD INTERCEPT (Ctrl+Q tetap jalan buat emergency)
+  // B. KEYBOARD INTERCEPT (PERBAIKAN TOMBOL KELUAR F7)
   examWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.key.toLowerCase() === 'q' && (input.control || input.meta)) {
-      event.preventDefault();
-      app.quit();
-      return;
+    
+    // 1. TOMBOL KELUAR: F7
+    if (input.key === 'F7') {
+        event.preventDefault();
+        app.quit(); // Langsung Tutup Aplikasi
+        return;
     }
 
-    if (input.key.startsWith('F') || input.alt || input.meta) {
+    // 2. BLOKIR SEMUA TOMBOL F (F1-F12), KECUALI F7
+    if (input.key.startsWith('F') && input.key !== 'F7') {
        event.preventDefault();
+       return;
+    }
+
+    // 3. BLOKIR KOMBINASI (Alt, Ctrl, WinKey)
+    if (input.alt || input.meta || input.control) {
+        // Blokir copy, paste, tab, dll
+        const forbidden = ['c', 'v', 'x', 'a', 'p', 's', 'w', 'r', 'Tab', 'Escape', 'ArrowLeft', 'ArrowRight', 'Delete', 'Backspace'];
+        
+        if (forbidden.includes(input.key) || input.alt || input.meta) {
+           event.preventDefault();
+        }
     }
   });
 
-  // C. LOOPING PENJAGA (Tetap jalan untuk memastikan layar tidak diminimize)
+  // C. LOOPING PENJAGA
   focusInterval = setInterval(() => {
     if (examWindow && !examWindow.isDestroyed()) {
       if (!examWindow.isFocused()) {
@@ -137,7 +145,7 @@ function createExamWindow(targetUrl) {
     }
   }, 100); 
 
-  // D. Blokir Navigasi
+  // D. Blokir Klik Kanan & Navigasi
   examWindow.webContents.on('context-menu', (e) => e.preventDefault());
   examWindow.webContents.setWindowOpenHandler(() => { return { action: 'deny' } });
 }
