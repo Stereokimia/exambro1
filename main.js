@@ -103,3 +103,8 @@ app.on('will-quit', () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
+
+// Rahasia: Tekan Control + Q untuk keluar aplikasi
+  globalShortcut.register('CommandOrControl+Q', () => {
+    app.quit()
+  })
