@@ -1,23 +1,23 @@
 {
-  "name": "exambro-sekolah",
+  "name": "exambro-pro",
   "version": "1.0.0",
-  "description": "Aplikasi Ujian Online",
+  "description": "Secure Exam Browser",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --win portable"
   },
-  "author": "Nama Kamu",
+  "author": "Admin",
   "license": "ISC",
   "devDependencies": {
     "electron": "^28.0.0",
     "electron-builder": "^24.9.1"
   },
   "build": {
-    "appId": "com.exambro.sekolah",
+    "appId": "com.exambro.pro",
     "win": {
       "target": "portable",
-      "icon": "icon.ico" 
+      "icon": "icon.ico"
     }
   }
 }
