@@ -1,16 +1,17 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, Menu, session } = require('electron')
+const { app, BrowserWindow, ipcMain, globalShortcut, clipboard } = require('electron')
 
 let launcherWindow
 let examWindow
 
-// 1. Buat Jendela Launcher (Kecil)
+// --- 1. JENDELA LAUNCHER (INPUT URL) ---
 function createLauncher() {
   launcherWindow = new BrowserWindow({
     width: 400,
-    height: 500,
+    height: 450,
     resizable: false,
     autoHideMenuBar: true,
-    frame: true, // Ada bingkai buat close kalau belum mulai
+    frame: true,
+    icon: __dirname + '/icon.ico', // Memuat Icon Aplikasi
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
@@ -20,82 +21,68 @@ function createLauncher() {
   launcherWindow.loadFile('index.html')
 }
 
-// 2. Buat Jendela Ujian (Secure Mode)
-function createExamWindow(examUrl) {
-  // Tutup launcher dulu
+// --- 2. JENDELA UJIAN (MODE RINGAN) ---
+function createExamWindow(targetUrl) {
+  // Tutup launcher agar hemat RAM
   if (launcherWindow) launcherWindow.close();
 
   examWindow = new BrowserWindow({
-    fullscreen: true,       // Layar Penuh
-    kiosk: true,            // Mode Kiosk (Menutup taskbar Windows)
-    alwaysOnTop: true,      // Selalu di paling atas
-    closable: false,        // Tidak bisa di-close user (kecuali Alt+F4 diblok)
-    movable: false,
-    minimizable: false,
-    autoHideMenuBar: true,  // Hilangkan menu
+    fullscreen: true,
+    kiosk: true,            // Mode Kiosk (Menutup taskbar)
+    frame: false,           // Hilangkan bingkai Windows
+    autoHideMenuBar: true,
+    icon: __dirname + '/icon.ico',
     webPreferences: {
-      nodeIntegration: false, // Security: Web luar ga bisa akses sistem
+      nodeIntegration: false, // Security: Web luar tidak bisa akses sistem
       contextIsolation: true,
       devTools: false         // Matikan Inspect Element
     }
   })
 
-  // Load URL Ujian
-  examWindow.loadURL(examUrl)
+  examWindow.loadURL(targetUrl)
 
-  // --- FITUR KEAMANAN EKSTRA ---
+  // --- KEAMANAN EFISIEN (HEMAT CPU) ---
 
-  // A. Blokir Menu Klik Kanan
-  examWindow.webContents.on('context-menu', (e) => {
-    e.preventDefault()
+  // A. Hapus Clipboard HANYA saat jendela kehilangan fokus
+  // (Saat siswa Alt+Tab atau klik aplikasi lain, clipboard otomatis kosong)
+  examWindow.on('blur', () => {
+    clipboard.clear()
+  })
+  
+  // B. Hapus juga saat kembali fokus
+  examWindow.on('focus', () => {
+    clipboard.clear()
   })
 
-  // B. Blokir Tombol Keyboard (Alt+Tab, F12, dll)
-  // Catatan: Alt+Tab level OS susah diblok total tanpa C++, tapi Kiosk mode menutup taskbar.
+  // C. Blokir Klik Kanan
+  examWindow.webContents.on('context-menu', (e) => e.preventDefault())
+
+  // D. Blokir Tombol Keyboard Fatal (Alt+Tab, F12, dll)
   globalShortcut.register('Alt+Tab', () => { return false }) 
   globalShortcut.register('Alt+F4', () => { return false }) 
-  globalShortcut.register('CommandOrControl+C', () => { return false }) // Copy
-  globalShortcut.register('CommandOrControl+V', () => { return false }) // Paste
   globalShortcut.register('F11', () => { return false })
-  globalShortcut.register('F5', () => { return false }) // Refresh (Opsional)
-  globalShortcut.register('F12', () => { return false }) // DevTools
+  globalShortcut.register('F5', () => { return false }) 
+  globalShortcut.register('F12', () => { return false }) 
+  globalShortcut.register('CommandOrControl+R', () => { return false }) // Reload
 
-  // C. Hapus Clipboard (Agar tidak bisa paste jawaban dari luar)
-  const { clipboard } = require('electron')
-  clipboard.clear()
-  setInterval(() => {
-     clipboard.clear()
-  }, 1000)
-
-  // D. Cegah membuka Tab Baru / Popup
-  examWindow.webContents.setWindowOpenHandler(() => {
-    return { action: 'deny' }
-  })
-
-  // E. Inject CSS untuk mencegah seleksi teks (di dalam website target)
-  examWindow.webContents.on('did-finish-load', () => {
-    examWindow.webContents.insertCSS(`
-      * { 
-        user-select: none !important; 
-        -webkit-user-select: none !important; 
-        -webkit-touch-callout: none !important; 
-      }
-    `)
+  // E. RAHASIA KELUAR: Tekan Ctrl + Q
+  globalShortcut.register('CommandOrControl+Q', () => {
+    app.quit()
   })
 }
 
-// --- LOGIKA APLIKASI ---
+// --- LOGIKA UTAMA ---
 
 app.whenReady().then(() => {
   createLauncher()
 
-  // Terima perintah dari index.html
+  // Menerima URL dari index.html
   ipcMain.on('start-exam-mode', (event, url) => {
     createExamWindow(url)
   })
 })
 
-// Matikan shortcut saat aplikasi keluar
+// Bersihkan memori saat keluar
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
 })
@@ -103,8 +90,3 @@ app.on('will-quit', () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
-
-// Rahasia: Tekan Control + Q untuk keluar aplikasi
-  globalShortcut.register('CommandOrControl+Q', () => {
-    app.quit()
-  })
