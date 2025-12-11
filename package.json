@@ -15,12 +15,13 @@
   },
   "build": {
     "appId": "com.exambro.pro",
-    "compression": "maximum",   <-- TAMBAHKAN INI (Biar file lebih kecil)
+    "compression": "maximum",   
     "win": {
       "target": "portable",
       "icon": "icon.ico"
     }
   }
 }
+
 
 
